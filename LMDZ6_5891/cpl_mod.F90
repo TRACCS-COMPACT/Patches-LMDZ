@@ -33,7 +33,7 @@ MODULE cpl_mod
   ! All subroutine are public except cpl_send_all
   PUBLIC :: cpl_init, cpl_receive_frac, cpl_receive_ocean_fields, cpl_receive_seaice_fields, &
        cpl_send_ocean_fields, cpl_send_seaice_fields, cpl_send_land_fields, &
-       cpl_send_landice_fields, gath2cpl, cpl_inca
+       cpl_send_landice_fields, gath2cpl, cpl2gath, cpl_inca
   
 
 ! Declaration of module variables

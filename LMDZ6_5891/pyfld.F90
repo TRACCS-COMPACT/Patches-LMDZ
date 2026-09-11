@@ -14,14 +14,15 @@ MODULE pyfld
    PUBLIC
 
    !!----------------------------------------------------------------------
-   !!                    2D Python coupling Module fields
-   !!----------------------------------------------------------------------
-   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: fld_a, fld_b, fld_res_a, fld_res_b  !: dummy field to store 2D fields
-
-   !!----------------------------------------------------------------------
    !!                    3D Python coupling Module fields
    !!----------------------------------------------------------------------
-   !REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)  :: fld_3D  !: dummy field to store 3D fields
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)  :: nn_u, nn_v, nn_tpot, nn_cosday, nn_sinday
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)  :: py_du, py_dv
+
+   !!----------------------------------------------------------------------
+   !!                    2D Python coupling Module fields
+   !!----------------------------------------------------------------------
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: nn_psol, nn_topo
 
 CONTAINS
 
@@ -37,9 +38,12 @@ CONTAINS
       ! Allocate arrays
  !$OMP MASTER
       IF ( lk_pycpl ) THEN
-         ALLOCATE( fld_a(nbp_lon,jj_nb), fld_b(nbp_lon,jj_nb), fld_res_a(nbp_lon,jj_nb), fld_res_b(nbp_lon,jj_nb) )
-         fld_a = 5.0
-         fld_b = -5.0
+         ALLOCATE( nn_u(nbp_lon,jj_nb,nbp_lev), nn_v(nbp_lon,jj_nb,nbp_lev), &
+                 & nn_tpot(nbp_lon,jj_nb,nbp_lev), nn_cosday(nbp_lon,jj_nb,nbp_lev) )
+         ALLOCATE( nn_sinday(nbp_lon,jj_nb,nbp_lev), nn_psol(nbp_lon,jj_nb), nn_topo(nbp_lon,jj_nb) )
+         ALLOCATE( py_du(nbp_lon,jj_nb,nbp_lev), py_dv(nbp_lon,jj_nb,nbp_lev) )
+         nn_cosday = 0.3 ! /
+         nn_sinday = -0.3 ! /
       END IF
  !$OMP END MASTER
       !
@@ -58,7 +62,8 @@ CONTAINS
       ! Free memory
  !$OMP MASTER
       IF ( lk_pycpl ) THEN
-         DEALLOCATE( fld_a, fld_b, fld_res_a, fld_res_b )
+         DEALLOCATE( nn_u, nn_v, nn_tpot, nn_cosday, nn_sinday, nn_psol, nn_topo)
+         DEALLOCATE( py_du, py_dv )
       END IF
  !$OMP END MASTER
       !

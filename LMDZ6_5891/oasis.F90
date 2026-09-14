@@ -80,6 +80,7 @@ CONTAINS
         CALL abort_physic(modname,abort_message,1)
      ENDIF
      
+!$OMP MASTER
      !************************************************************************************
      !  psmile initialisation if not done by mpi module
      !************************************************************************************
@@ -95,12 +96,14 @@ CONTAINS
      ENDIF
 
      CALL prism_get_localcomm_proto (il_commlocal, ierror)
+!$OMP END MASTER
   
      !************************************************************************************
      ! Gather global index to be used for oasis decomposition
      !************************************************************************************
      CALL gather_omp(ind_cell_glo,ind_cell_glo_mpi)
 
+!$OMP MASTER
      !************************************************************************************
      ! Domain decomposition
      !************************************************************************************
@@ -140,6 +143,7 @@ CONTAINS
      ELSE
         WRITE(lunout,*) 'inicma : decomposition domaine psmile ok '
      ENDIF
+!$OMP END MASTER
 
   END SUBROUTINE cpl_def_domain
 

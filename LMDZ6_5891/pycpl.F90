@@ -25,6 +25,7 @@ MODULE pycpl
    USE phys_state_var_mod, ONLY: phys_tstep
    USE print_control_mod, ONLY: lunout
    USE cpl_mod, ONLY: gath2cpl, cpl2gath
+   USE mod_phys_lmdz_para, ONLY: bcast_omp
    USE dimphy, ONLY: klon, klev
 
    IMPLICIT NONE
@@ -81,6 +82,13 @@ CONTAINS
        END IF
       !
 #if defined key_eophis
+      !
+      ! Identity index array for physics-to-coupling grid transformation.
+      ALLOCATE(pycpl_unity(klon))
+      DO ig = 1, klon
+          pycpl_unity(ig) = ig
+      ENDDO
+      !
 !$OMP MASTER
       !
       IF (is_mpi_root) WRITE(lunout,*) '      Reading Eophis namelist'
@@ -117,12 +125,6 @@ CONTAINS
          CALL eophis_next_var(curr_var)
       END DO
       !
-      ! Identity index array for physics-to-coupling grid transformation
-      ALLOCATE(pycpl_unity(klon))
-      DO ig = 1, klon
-          pycpl_unity(ig) = ig
-      ENDDO
-      !
       ! Array bounds
       kstart = ii_begin
       IF (is_south_pole_dyn) THEN
@@ -135,8 +137,8 @@ CONTAINS
       !    Configure coupling layer    !
       ! ============================== !
       CALL cpl_vardef(midpycpl)
-#endif
 !$OMP END MASTER
+#endif
       !
    END SUBROUTINE init_python_coupling
 
@@ -359,7 +361,7 @@ CONTAINS
       INTEGER :: isec, ilvl, nlvl
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
-      REAL, DIMENSION(nbp_lon,jj_nb) :: field_2d
+      REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
       !!----------------------------------------------------------------------
        !
 #if defined key_eophis
@@ -378,14 +380,22 @@ CONTAINS
           CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
        END IF
        !
+       ! Number of levels to send
+       nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
+!$OMP END MASTER
+       !
+       ! Distribute the level count from the OMP master
+       CALL bcast_omp(nlvl)
+       !
        ! Gather from physics to coupling grid
-       DO ilvl = 1, infosend(midpycpl)%fld(curr_var%idx)%nlvl
-          CALL gath2cpl(to_send(:,ilvl), field_2d, klon, pycpl_unity)
-          zbuf(:,ilvl) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
+       DO ilvl = 1, nlvl
+          CALL gath2cpl(to_send(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
        END DO
        !
-       ! Coupling layer   
-       CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
+!$OMP MASTER
+       ! Coupling layer (OMP master only)
+       zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
+       CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
 !$OMP END MASTER
 #endif
       !
@@ -432,12 +442,14 @@ CONTAINS
        IF (curr_var%in) THEN
           CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
        END IF
+!$OMP END MASTER
        !
        ! Gather from physics to coupling grid
        CALL gath2cpl(to_send, field_2d, klon, pycpl_unity)
-       zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
        !
-       ! Coupling layer
+!$OMP MASTER
+       ! Coupling layer (OMP master only)
+       zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
        CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
 !$OMP END MASTER
 #endif
@@ -467,7 +479,7 @@ CONTAINS
       INTEGER :: isec, ilvl, nlvl
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
-      REAL, DIMENSION(nbp_lon,jj_nb) :: field_2d
+      REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
       REAL, DIMENSION(klon_mpi) :: gath_buf
       !!----------------------------------------------------------------------
        !
@@ -487,22 +499,30 @@ CONTAINS
           CALL abort_physic( 'receive_from_python' , ' function called for outcoming variable '//TRIM(varname) )
        END IF
        !
+       ! Number of levels to receive
+       nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
+!$OMP END MASTER
+       !
+       ! Distribute the level count from the OMP master
+       CALL bcast_omp(nlvl)
+       !
        ! save value if nothing is done
-       DO ilvl = 1, inforecv(midpycpl)%fld(curr_var%idx)%nlvl
-          CALL gath2cpl(to_rcv(:,ilvl), field_2d, klon, pycpl_unity)
-          zbuf(:,ilvl) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
+       DO ilvl = 1, nlvl
+          CALL gath2cpl(to_rcv(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
        END DO
        !
-       ! Coupling layer
-       CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
-       !         
+!$OMP MASTER
+       ! Coupling layer (OMP master only)
+       zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
+       CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
+       field_3d(:,:,1:nlvl) = RESHAPE(zbuf(:,1:nlvl),(/nbp_lon,jj_nb,nlvl/))
+!$OMP END MASTER
+       !
        ! Scatter from coupling to physics grid
-       DO ilvl = 1, inforecv(midpycpl)%fld(curr_var%idx)%nlvl
-          field_2d = RESHAPE(zbuf(:,ilvl),(/nbp_lon,jj_nb/))
-          CALL cpl2gath(field_2d, gath_buf, klon, pycpl_unity)
+       DO ilvl = 1, nlvl
+          CALL cpl2gath(field_3d(:,:,ilvl), gath_buf, klon, pycpl_unity)
           to_rcv(:,ilvl) = gath_buf(1:klon)
        END DO
-!$OMP END MASTER
 #endif
       !
    END SUBROUTINE receive_from_python_phys_3d
@@ -549,19 +569,21 @@ CONTAINS
        IF (.NOT. curr_var%in) THEN
           CALL abort_physic( 'receive_from_python' , ' function called for outcoming variable '//TRIM(varname) )
        END IF
+!$OMP END MASTER
        !
        ! save value if nothing is done
        CALL gath2cpl(to_rcv, field_2d, klon, pycpl_unity)
-       zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
        !
-       ! coupling layer   
+!$OMP MASTER
+       ! Coupling layer (OMP master only)
+       zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
        CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
+       field_2d = RESHAPE(zbuf(:,1),(/nbp_lon,jj_nb/))
+!$OMP END MASTER
        !
        ! Scatter from coupling to physics grid
-       field_2d = RESHAPE(zbuf(:,1),(/nbp_lon,jj_nb/))
        CALL cpl2gath(field_2d, gath_buf, klon, pycpl_unity)
        to_rcv(:) = gath_buf(1:klon)
-!$OMP END MASTER
 #endif
       !
    END SUBROUTINE receive_from_python_phys_2d
@@ -579,9 +601,10 @@ CONTAINS
 #if defined key_eophis
 !$OMP MASTER
       DEALLOCATE(infosend(midpycpl)%fld,inforecv(midpycpl)%fld)
-      IF (ALLOCATED(pycpl_unity)) DEALLOCATE(pycpl_unity)
       CALL purge_eophis()
 !$OMP END MASTER
+      !
+      IF (ALLOCATED(pycpl_unity)) DEALLOCATE(pycpl_unity)
 #endif
       !
    END SUBROUTINE finalize_python_coupling

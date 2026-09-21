@@ -6,8 +6,9 @@ MODULE pyfld
    !! History :  LMDZ6  ! 2026-06  (A. Barge)  Original code
    !!----------------------------------------------------------------------
    USE pycpl
-   USE Bands, ONLY: distrib_caldyn
    USE dimensions_mod, ONLY: llm
+   USE mod_phys_lmdz_mpi_data, ONLY: jj_begin, jj_end
+   USE mod_grid_phy_lmdz, ONLY: nbp_lon
 
    IMPLICIT NONE
    PUBLIC
@@ -30,6 +31,9 @@ MODULE pyfld
    !!----------------------------------------------------------------------
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: py_du_dyn, py_dv_dyn
 
+   ! Flattened dynamics bounds of the coupling band
+   INTEGER, PUBLIC, SAVE :: ij_lo_u, ij_hi_u, ij_lo_v, ij_hi_v
+
 CONTAINS
 
    SUBROUTINE pyfld_alloc()
@@ -46,12 +50,16 @@ CONTAINS
       IF ( lk_pycpl ) THEN
          ! Coupling grid
          ALLOCATE( nn_cosday(nbp_lon,jj_nb,nbp_lev), nn_sinday(nbp_lon,jj_nb,nbp_lev) )
-         ! Dynamics grids (same bounds as ucov / vcov / ps, halo included)
-         ALLOCATE( nn_u_dyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u, llm) )
-         ALLOCATE( nn_v_dyn(distrib_caldyn%ijb_v:distrib_caldyn%ije_v, llm) )
-         ALLOCATE( nn_topo_dyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u) )
-         ALLOCATE( py_du_dyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u, llm) )
-         ALLOCATE( py_dv_dyn(distrib_caldyn%ijb_v:distrib_caldyn%ije_v, llm) )
+         ! Dynamics grids without halos
+         ij_lo_u = (jj_begin-1)*(nbp_lon+1) + 1
+         ij_hi_u =  jj_end   *(nbp_lon+1)
+         ij_lo_v = ij_lo_u
+         ij_hi_v = MIN(jj_end, nbp_lat-1)*(nbp_lon+1)
+         ALLOCATE( nn_u_dyn(ij_lo_u:ij_hi_u, llm) )
+         ALLOCATE( nn_v_dyn(ij_lo_v:ij_hi_v, llm) )
+         ALLOCATE( nn_topo_dyn(ij_lo_u:ij_hi_u) )
+         ALLOCATE( py_du_dyn(ij_lo_u:ij_hi_u, llm) )
+         ALLOCATE( py_dv_dyn(ij_lo_v:ij_hi_v, llm) )
       END IF
  !$OMP END MASTER
       !

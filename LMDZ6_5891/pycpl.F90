@@ -370,8 +370,10 @@ CONTAINS
       !! ** Arguments : CHAR varname   : name of the field to send
       !!                REAL(:,:) to_send : 3D field, layout depends on the grid:
       !!                   pycpl_phys  : (klon, klev), physics grid
-      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, allocated like ucov
-      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, allocated like vcov
+      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
+      !!                                the latitude band of the coupling grid
       !!                INT kt        : physics time step (same numbering as physiq itap)
       !!                INT grid      : grid selector
       !!
@@ -388,6 +390,7 @@ CONTAINS
       REAL, DIMENSION(:,:), INTENT(in) ::  to_send
       ! local variables
       INTEGER :: isec, ilvl, nlvl, i, j, l, nrow, ij, ij0, ij_lo
+      INTEGER :: ij_hi, j_lo, j_hi
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
       REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
@@ -445,37 +448,40 @@ CONTAINS
             CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
          END IF
          !
-         ! Number of levels to send
-         nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
-         !
-         ! v-grid has no pole row. Fill last coupling row with a duplicate of the last v row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-            nrow = (nbp_lat-1) - jj_begin + 1
-         ELSE
-            nrow = jj_nb
-         END IF
-         !
-         ! First flattened index of the source array
-         ij_lo = LBOUND(to_send,1) - 1
-         !
-         ! Grid remapping
-         zbuf = 0.
-         DO j = jj_begin, jj_begin+nrow-1
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo
-               DO l = 1, nlvl
-                  zbuf(i+(j-jj_begin)*nbp_lon, l) = to_send(ij0,l)
-               END DO
-            END DO
-         END DO
-         !
-         ! Duplicate last v row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
-            DO l = 1, nlvl
-               zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
-            END DO
-         END IF
+          ! Number of levels to send
+          nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
+          !
+          ! First and last flattened indices of the source array: no halo
+          ij_lo = LBOUND(to_send,1)
+          ij_hi = UBOUND(to_send,1)
+          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
+          j_hi  = ij_hi/(nbp_lon+1)
+          !
+          ! v-grid has no pole row. Fill last couplig row with a duplicate of the last v row
+          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
+             nrow = (nbp_lat-1) - j_lo + 1
+          ELSE
+             nrow = jj_nb
+          END IF
+          !
+          ! Grid remapping
+          zbuf = 0.
+          DO j = j_lo, j_hi
+             DO i = 1, nbp_lon
+                ij  = (j-1)*(nbp_lon+1) + i
+                ij0 = ij - ij_lo + 1
+                DO l = 1, nlvl
+                   zbuf(i+(j-j_lo)*nbp_lon, l) = to_send(ij0,l)
+                END DO
+             END DO
+          END DO
+          !
+          ! Duplicate last v row
+          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
+             DO l = 1, nlvl
+                zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
+             END DO
+          END IF
          !
          ! Coupling layer
          CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
@@ -501,7 +507,8 @@ CONTAINS
       !! ** Arguments : CHAR varname : name of the field to send
       !!                REAL(:) to_send : 2D field, layout depends on the grid:
       !!                   pycpl_phys  : (klon), physics grid
-      !!                   pycpl_dyn_u : flattened (ij), u-grid, allocated like ps
+      !!                   pycpl_dyn_u : flattened (ij), u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
       !!                INT kt          : physics time step (same numbering as physiq itap)
       !!                INT grid        : grid selector
       !!
@@ -516,6 +523,7 @@ CONTAINS
       REAL, DIMENSION(:), INTENT(in) ::  to_send
       ! local variables
       INTEGER :: isec, i, j, ij, ij0, ij_lo
+      INTEGER :: ij_hi, j_lo, j_hi
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,1) :: zbuf
       REAL, DIMENSION(nbp_lon,jj_nb) :: field_2d
@@ -564,18 +572,21 @@ CONTAINS
          IF (curr_var%in) THEN
             CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
          END IF
-         !
-         ! First flattened index of the source array
-         ij_lo = LBOUND(to_send,1) - 1
-         !
-         ! Grid remapping
-         DO j = jj_begin, jj_end
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo
-               zbuf(i+(j-jj_begin)*nbp_lon, 1) = to_send(ij0)
-            END DO
-         END DO
+          !
+          ! First and last flattened indices of the source array: no halo
+          ij_lo = LBOUND(to_send,1)
+          ij_hi = UBOUND(to_send,1)
+          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
+          j_hi  = ij_hi/(nbp_lon+1)
+          !
+          ! Grid remapping
+          DO j = j_lo, j_hi
+             DO i = 1, nbp_lon
+                ij  = (j-1)*(nbp_lon+1) + i
+                ij0 = ij - ij_lo + 1
+                zbuf(i+(j-j_lo)*nbp_lon, 1) = to_send(ij0)
+             END DO
+          END DO
          !
          ! Coupling layer
          CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
@@ -601,8 +612,10 @@ CONTAINS
       !! ** Arguments : CHAR varname   : name of the field to receive
       !!                REAL(:,:) to_rcv : 3D field, layout depends on the grid:
       !!                   pycpl_phys  : (klon, klev), physics grid
-      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, allocated like ucov
-      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, allocated like vcov
+      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
+      !!                                the latitude band of the coupling grid
       !!                INT kt        : physics time step (same numbering as physiq itap)
       !!                INT grid      : grid selector
       !!
@@ -623,12 +636,13 @@ CONTAINS
       INTEGER, INTENT(in)           ::  grid
       CHARACTER(len=*), INTENT(in)  :: varname
       REAL, DIMENSION(:,:), INTENT(inout) ::  to_rcv
-      ! local variables
-      INTEGER :: isec, ilvl, nlvl, i, j, l, nrow, ij, ij0, ij_lo
-      TYPE(eophis_var), POINTER :: curr_var
-      REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
-      REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
-      REAL, DIMENSION(klon_mpi) :: gath_buf
+       ! local variables
+       INTEGER :: isec, ilvl, nlvl, i, j, l, nrow, ij, ij0, ij_lo
+       INTEGER :: ij_hi, j_lo, j_hi
+       TYPE(eophis_var), POINTER :: curr_var
+       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
+       REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
+       REAL, DIMENSION(klon_mpi) :: gath_buf
       !!----------------------------------------------------------------------
       !
 #if defined key_eophis
@@ -690,49 +704,52 @@ CONTAINS
             CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
          END IF
          !
-         ! Number of levels to receive
-         nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
-         !
-         ! Drop last fake S row: v-grid has no pole row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-            nrow = (nbp_lat-1) - jj_begin + 1
-         ELSE
-            nrow = jj_nb
-         END IF
-         !
-         ! First flattened index of the target array
-         ij_lo = LBOUND(to_rcv,1) - 1
-         !
-         ! save value if nothing is done
-         zbuf = 0.
-         DO j = jj_begin, jj_begin+nrow-1
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo
-               DO l = 1, nlvl
-                  zbuf(i+(j-jj_begin)*nbp_lon, l) = to_rcv(ij0,l)
-               END DO
-            END DO
-         END DO
-         !
-         ! Coupling layer
-         CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
-         !
-         ! Scatter from coupling to dynamics grid
-         DO j = jj_begin, jj_begin+nrow-1
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo
-               DO l = 1, nlvl
-                  to_rcv(ij0,l) = zbuf(i+(j-jj_begin)*nbp_lon, l)
-               END DO
-            END DO
-            ! column iip1 duplicates column 1 (dynamics periodicity)
-            ij = (j-1)*(nbp_lon+1)
-            DO l = 1, nlvl
-               to_rcv(ij+nbp_lon+1-ij_lo, l) = to_rcv(ij+1-ij_lo, l)
-            END DO
-         END DO
+          ! Number of levels to receive
+          nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
+          !
+          ! First and last flattened indices of the source array: no halo
+          ij_lo = LBOUND(to_rcv,1)
+          ij_hi = UBOUND(to_rcv,1)
+          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
+          j_hi  = ij_hi/(nbp_lon+1)
+          !
+          ! Drop last fake S row: v-grid has no pole row
+          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
+             nrow = (nbp_lat-1) - j_lo + 1
+          ELSE
+             nrow = jj_nb
+          END IF
+          !
+          ! save value if nothing is done
+          zbuf = 0.
+          DO j = j_lo, j_hi
+             DO i = 1, nbp_lon
+                ij  = (j-1)*(nbp_lon+1) + i
+                ij0 = ij - ij_lo + 1
+                DO l = 1, nlvl
+                   zbuf(i+(j-j_lo)*nbp_lon, l) = to_rcv(ij0,l)
+                END DO
+             END DO
+          END DO
+          !
+          ! Coupling layer
+          CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
+          !
+          ! Scatter from coupling to dynamics grid
+          DO j = j_lo, j_hi
+             DO i = 1, nbp_lon
+                ij  = (j-1)*(nbp_lon+1) + i
+                ij0 = ij - ij_lo + 1
+                DO l = 1, nlvl
+                   to_rcv(ij0,l) = zbuf(i+(j-j_lo)*nbp_lon, l)
+                END DO
+             END DO
+             ! column iip1 duplicates column 1 (dynamics periodicity)
+             ij = (j-1)*(nbp_lon+1)
+             DO l = 1, nlvl
+                to_rcv(ij+nbp_lon+1-ij_lo+1, l) = to_rcv(ij+1-ij_lo+1, l)
+             END DO
+          END DO
 !$OMP END MASTER
          !
       CASE DEFAULT
@@ -794,7 +811,7 @@ CONTAINS
          CALL gath2cpl(to_rcv, field_2d, klon, pycpl_unity)
          !
 !$OMP MASTER
-         ! Coupling layer (OMP master only)
+         ! Coupling layer
          zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
          CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
          field_2d = RESHAPE(zbuf(:,1),(/nbp_lon,jj_nb/))

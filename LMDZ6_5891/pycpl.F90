@@ -83,30 +83,30 @@ CONTAINS
       !!                * Define exchanges
       !!                * Configure coupling layer
       !!----------------------------------------------------------------------
-        ! I/O
-        ! local variables
-        INTEGER :: ios, jpexch, ig
-        INTEGER :: jsnd = 1, jrcv = 1
-        TYPE(eophis_var), POINTER :: curr_var
-        !!----------------------------------------------------------------------
-        !
-        ! ===============
-        !    Initialize
-        ! ===============
-        !
-        IF (is_mpi_root) THEN    ! control print
-           WRITE(lunout,*)
-           WRITE(lunout,*) 'init_python_coupling: Setting Python models'
-           WRITE(lunout,*) '~~~~~~~~~~~~~~~~~~~~'
-        END IF
-       !
+      ! I/O
+      ! local variables
+      INTEGER :: ios, jpexch, ig
+      INTEGER :: jsnd = 1, jrcv = 1
+      TYPE(eophis_var), POINTER :: curr_var
+      !!----------------------------------------------------------------------
+      !
+      ! ===============
+      !    Initialize
+      ! ===============
+      !
+      IF (is_mpi_root) THEN    ! control print
+         WRITE(lunout,*)
+         WRITE(lunout,*) 'init_python_coupling: Setting Python models'
+         WRITE(lunout,*) '~~~~~~~~~~~~~~~~~~~~'
+      END IF
+      !
 #if defined key_eophis
       !
       ! Identity index array for physics-to-coupling grid transformation.
       ! every OMP thread allocates and fills its own copy
       ALLOCATE(pycpl_unity(klon))
       DO ig = 1, klon
-          pycpl_unity(ig) = ig
+         pycpl_unity(ig) = ig
       ENDDO
       !
 !$OMP MASTER
@@ -448,40 +448,40 @@ CONTAINS
             CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
          END IF
          !
-          ! Number of levels to send
-          nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
-          !
-          ! First and last flattened indices of the source array: no halo
-          ij_lo = LBOUND(to_send,1)
-          ij_hi = UBOUND(to_send,1)
-          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
-          j_hi  = ij_hi/(nbp_lon+1)
-          !
-          ! v-grid has no pole row. Fill last couplig row with a duplicate of the last v row
-          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-             nrow = (nbp_lat-1) - j_lo + 1
-          ELSE
-             nrow = jj_nb
-          END IF
-          !
-          ! Grid remapping
-          zbuf = 0.
-          DO j = j_lo, j_hi
-             DO i = 1, nbp_lon
-                ij  = (j-1)*(nbp_lon+1) + i
-                ij0 = ij - ij_lo + 1
-                DO l = 1, nlvl
-                   zbuf(i+(j-j_lo)*nbp_lon, l) = to_send(ij0,l)
-                END DO
-             END DO
-          END DO
-          !
-          ! Duplicate last v row
-          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
-             DO l = 1, nlvl
-                zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
-             END DO
-          END IF
+         ! Number of levels to send
+         nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
+         !
+         ! First and last flattened indices of the source array: no halo
+         ij_lo = LBOUND(to_send,1)
+         ij_hi = UBOUND(to_send,1)
+         j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
+         j_hi  = ij_hi/(nbp_lon+1)
+         !
+         ! v-grid has no pole row. Fill last couplig row with a duplicate of the last v row
+         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
+            nrow = (nbp_lat-1) - j_lo + 1
+         ELSE
+            nrow = jj_nb
+         END IF
+         !
+         ! Grid remapping
+         zbuf = 0.
+         DO j = j_lo, j_hi
+            DO i = 1, nbp_lon
+               ij  = (j-1)*(nbp_lon+1) + i
+               ij0 = ij - ij_lo + 1
+               DO l = 1, nlvl
+                  zbuf(i+(j-j_lo)*nbp_lon, l) = to_send(ij0,l)
+               END DO
+            END DO
+         END DO
+         !
+         ! Duplicate last v row
+         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
+            DO l = 1, nlvl
+               zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
+            END DO
+         END IF
          !
          ! Coupling layer
          CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
@@ -704,52 +704,52 @@ CONTAINS
             CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
          END IF
          !
-          ! Number of levels to receive
-          nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
-          !
-          ! First and last flattened indices of the source array: no halo
-          ij_lo = LBOUND(to_rcv,1)
-          ij_hi = UBOUND(to_rcv,1)
-          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
-          j_hi  = ij_hi/(nbp_lon+1)
-          !
-          ! Drop last fake S row: v-grid has no pole row
-          IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-             nrow = (nbp_lat-1) - j_lo + 1
-          ELSE
-             nrow = jj_nb
-          END IF
-          !
-          ! save value if nothing is done
-          zbuf = 0.
-          DO j = j_lo, j_hi
-             DO i = 1, nbp_lon
-                ij  = (j-1)*(nbp_lon+1) + i
-                ij0 = ij - ij_lo + 1
-                DO l = 1, nlvl
-                   zbuf(i+(j-j_lo)*nbp_lon, l) = to_rcv(ij0,l)
-                END DO
-             END DO
-          END DO
-          !
-          ! Coupling layer
-          CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
-          !
-          ! Scatter from coupling to dynamics grid
-          DO j = j_lo, j_hi
-             DO i = 1, nbp_lon
-                ij  = (j-1)*(nbp_lon+1) + i
-                ij0 = ij - ij_lo + 1
-                DO l = 1, nlvl
-                   to_rcv(ij0,l) = zbuf(i+(j-j_lo)*nbp_lon, l)
-                END DO
-             END DO
-             ! column iip1 duplicates column 1 (dynamics periodicity)
-             ij = (j-1)*(nbp_lon+1)
-             DO l = 1, nlvl
-                to_rcv(ij+nbp_lon+1-ij_lo+1, l) = to_rcv(ij+1-ij_lo+1, l)
-             END DO
-          END DO
+         ! Number of levels to receive
+         nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
+         !
+         ! First and last flattened indices of the source array: no halo
+         ij_lo = LBOUND(to_rcv,1)
+         ij_hi = UBOUND(to_rcv,1)
+         j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
+         j_hi  = ij_hi/(nbp_lon+1)
+         !
+         ! Drop last fake S row: v-grid has no pole row
+         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
+            nrow = (nbp_lat-1) - j_lo + 1
+         ELSE
+            nrow = jj_nb
+         END IF
+         !
+         ! save value if nothing is done
+         zbuf = 0.
+         DO j = j_lo, j_hi
+            DO i = 1, nbp_lon
+               ij  = (j-1)*(nbp_lon+1) + i
+               ij0 = ij - ij_lo + 1
+               DO l = 1, nlvl
+                  zbuf(i+(j-j_lo)*nbp_lon, l) = to_rcv(ij0,l)
+               END DO
+            END DO
+         END DO
+         !
+         ! Coupling layer
+         CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
+         !
+         ! Scatter from coupling to dynamics grid
+         DO j = j_lo, j_hi
+            DO i = 1, nbp_lon
+               ij  = (j-1)*(nbp_lon+1) + i
+               ij0 = ij - ij_lo + 1
+               DO l = 1, nlvl
+                  to_rcv(ij0,l) = zbuf(i+(j-j_lo)*nbp_lon, l)
+               END DO
+            END DO
+            ! column iip1 duplicates column 1 (dynamics periodicity)
+            ij = (j-1)*(nbp_lon+1)
+            DO l = 1, nlvl
+               to_rcv(ij+nbp_lon+1-ij_lo+1, l) = to_rcv(ij+1-ij_lo+1, l)
+            END DO
+         END DO
 !$OMP END MASTER
          !
       CASE DEFAULT

@@ -130,6 +130,7 @@ CONTAINS
       !  1. Time step conversion
       ! ===============
       ktphy = itau / iphysiq
+      IF (ktphy < 1) RETURN
       !
       ! ===============
       !  2. Fill derived fields

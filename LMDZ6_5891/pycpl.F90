@@ -15,22 +15,22 @@ MODULE pycpl
 
    !!------------------------------ MODULE API ----------------------------
    !!   init_python_coupling     : Initialize coupling with Python
-   !!   send_to_python           : send fields to external Python model
-   !!   receive_from_python      : receive fields from external Python model
+   !!   send_to_python_GRD       : send fields to external Python model from GRD grid type
+   !!   receive_from_python_GRD  : receive fields from external Python model on GRD grid type
    !!   finalize_python_coupling : Free memory
    !!
    !!   Exchanged fields live on the coupling grid (nbp_lon, jj_nb, nlvl).
-   !!   Three families of layouts:
-   !!     - coupling grid (nbp_lon, jj_nb, nbp_lev) : no flag
-   !!     - physics grid  (klon, klev) / (klon)     : flag pycpl_phys
-   !!     - dynamics grids, flattened (ij, llm)     : flags pycpl_dyn_u / pycpl_dyn_v
+   !!   Three families of GRD:
+   !!     - coupling grid (nbp_lon, jj_nb, nbp_lev) : GRD = cpl
+   !!     - physics grid  (klon, klev)              : GRD = phys
+   !!     - dynamics grids, flattened (ij, llm)     : GRD = dyn ; flags pycpl_grid_u / pycpl_grid_v
    !!
    !!   kt argument is the physics time step number, whatever the calling context.
    !!
    !!   This module is a pure transition layer: it only performs grid
    !!   remapping (and the grid completion that the caller cannot provide:
-   !!   fake 90S row and duplicated last v row on pycpl_dyn_v, wrap column
-   !!   iip1 on the dynamics grids). Values are sent / received AS PROVIDED
+   !!   fake 90S row and duplicated last v row on pycpl_grid_v, wrap column
+   !!   Values are sent / received AS PROVIDED
    !!----------------------------------------------------------------------
    USE eophis_def
    USE oasis
@@ -45,31 +45,53 @@ MODULE pycpl
    IMPLICIT NONE
    PUBLIC
 
+   ! Is module activated
+   ! -------------------
 #if defined key_eophis
    LOGICAL, PUBLIC :: lk_pycpl = .TRUE.
 #else
    LOGICAL, PUBLIC :: lk_pycpl = .FALSE.
 #endif
-   INTEGER, PRIVATE :: kstart, kend
 
+   ! SEND interface for cpl, phys or dyn grids
+   ! -----------------------------------------
+   INTERFACE send_to_python_cpl
+      MODULE PROCEDURE send_to_python_cpl_3d, send_to_python_cpl_2d
+   END INTERFACE send_to_python_cpl
+
+   INTERFACE send_to_python_phys
+      MODULE PROCEDURE send_to_python_phys_3d, send_to_python_phys_2d
+   END INTERFACE send_to_python_phys
+
+   INTERFACE send_to_python_dyn
+      MODULE PROCEDURE send_to_python_dyn_3d, send_to_python_dyn_2d
+   END INTERFACE send_to_python_dyn
+
+   ! RECEIVE interface for cpl, phys or dyn grids
+   ! --------------------------------------------
+   INTERFACE receive_from_python_cpl
+      MODULE PROCEDURE receive_from_python_cpl_3d, receive_from_python_cpl_2d
+   END INTERFACE receive_from_python_cpl
+
+   INTERFACE receive_from_python_phys
+      MODULE PROCEDURE receive_from_python_phys_3d, receive_from_python_phys_2d
+   END INTERFACE receive_from_python_phys
+
+   INTERFACE receive_from_python_dyn
+      MODULE PROCEDURE receive_from_python_dyn_3d
+   END INTERFACE receive_from_python_dyn
+
+   ! Module variables
+   ! ----------------
    ! Identity index array for physics-to-coupling grid transformation.
    INTEGER, PRIVATE, ALLOCATABLE, SAVE, DIMENSION(:) :: pycpl_unity
-!$OMP THREADPRIVATE(pycpl_unity)
+   !$OMP THREADPRIVATE(pycpl_unity)
 
-   ! Grid selectors of the generic (flagged) routines
-   INTEGER, PUBLIC, PARAMETER :: pycpl_phys  = 1  ! physics grid (klon,klev) / (klon)
-   INTEGER, PUBLIC, PARAMETER :: pycpl_dyn_u = 2  ! dynamics u-grid, flattened like ucov
-   INTEGER, PUBLIC, PARAMETER :: pycpl_dyn_v = 3  ! dynamics v-grid, flattened like vcov
+   INTEGER, PRIVATE :: kstart, kend
 
-   INTERFACE send_to_python
-      MODULE PROCEDURE send_to_python_3d, send_to_python_2d, &
-                       send_to_python_gen_3d, send_to_python_gen_2d
-   END INTERFACE send_to_python
-
-   INTERFACE receive_from_python
-      MODULE PROCEDURE receive_from_python_3d, receive_from_python_2d, &
-                       receive_from_python_gen_3d, receive_from_python_gen_2d
-   END INTERFACE receive_from_python
+   ! Grid selectors of the dynamic grids
+   INTEGER, PUBLIC, PARAMETER :: pycpl_grid_u = 1  ! dynamics u-grid, flattened like ucov
+   INTEGER, PUBLIC, PARAMETER :: pycpl_grid_v = 2  ! dynamics v-grid, flattened like vcov
 
 CONTAINS
 
@@ -163,11 +185,14 @@ CONTAINS
    END SUBROUTINE init_python_coupling
 
 
-   SUBROUTINE send_to_python_3d(varname,to_send,kt)
+   ! ++++++++++++ COUPLING GRID ++++++++++++
+
+
+   SUBROUTINE send_to_python_cpl_3d(varname,to_send,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE send_to_python ***
+      !!             ***  ROUTINE send_to_python_cpl ***
       !!
-      !! ** Purpose :   Proceed coupler sending from coupling definition
+      !! ** Purpose :   Proceed coupler sending from coupling grid
       !!
       !! ** Arguments : CHAR varname : name of the field to send
       !!                REAL(:,:,:) to_send  : Array to send on the coupling grid
@@ -208,14 +233,14 @@ CONTAINS
 !$OMP END MASTER
 #endif
       !
-   END SUBROUTINE send_to_python_3d
+   END SUBROUTINE send_to_python_cpl_3d
 
 
-   SUBROUTINE send_to_python_2d(varname,to_send,kt)
+   SUBROUTINE send_to_python_cpl_2d(varname,to_send,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE send_to_python ***
+      !!             ***  ROUTINE send_to_python_cpl ***
       !!
-      !! ** Purpose :   Proceed coupler sending from coupling definition
+      !! ** Purpose :   Proceed coupler sending from coupling grid
       !!
       !! ** Arguments : CHAR varname : name of the field to send
       !!                REAL(:,:) to_send  : Array to send on the coupling grid
@@ -254,14 +279,14 @@ CONTAINS
 !$OMP END MASTER
 #endif
       !
-   END SUBROUTINE send_to_python_2d
+   END SUBROUTINE send_to_python_cpl_2d
 
 
-   SUBROUTINE receive_from_python_3d(varname,to_rcv,kt)
+   SUBROUTINE receive_from_python_cpl_3d(varname,to_rcv,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE receive_from_python  ***
+      !!             ***  ROUTINE receive_from_python_cpl  ***
       !!
-      !! ** Purpose :   Proceed coupler receiving from coupling definition
+      !! ** Purpose :   Proceed coupler receiving on coupling grid
       !!
       !! ** Arguments : CHAR varname : name of the field to receive
       !!                REAL(:,:,:) to_rcv : Array in which store received field
@@ -307,14 +332,14 @@ CONTAINS
 !$OMP END MASTER
 #endif
       !
-   END SUBROUTINE receive_from_python_3d
+   END SUBROUTINE receive_from_python_cpl_3d
 
 
-   SUBROUTINE receive_from_python_2d(varname,to_rcv,kt)
+   SUBROUTINE receive_from_python_cpl_2d(varname,to_rcv,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE receive_from_python  ***
+      !!             ***  ROUTINE receive_from_python_cpl  ***
       !!
-      !! ** Purpose :   Proceed coupler receiving from coupling definition
+      !! ** Purpose :   Proceed coupler receiving on coupling grid
       !!
       !! ** Arguments : CHAR varname : name of the field to receive
       !!                REAL(:,:) to_rcv : Array in which store received field
@@ -356,41 +381,32 @@ CONTAINS
 !$OMP END MASTER
 #endif
       !
-   END SUBROUTINE receive_from_python_2d
+   END SUBROUTINE receive_from_python_cpl_2d
 
 
-   SUBROUTINE send_to_python_gen_3d(varname,to_send,kt,grid)
+   ! ++++++++++++ PHYSIC GRID ++++++++++++
+
+
+   SUBROUTINE send_to_python_phys_3d(varname,to_send,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE send_to_python_gen_3d  ***
+      !!             ***  ROUTINE send_to_python_phys  ***
       !!
-      !! ** Purpose :   Send a 3D field to the Python coupler from either the
-      !!                physics grid or one of the dynamics grids. The field is
-      !!                transformed to the coupling grid (nbp_lon, jj_nb, nlvl).
+      !! ** Purpose :   Send a 3D field to the coupler from the physics grid
+      !!                The field is transformed to the coupling grid
       !!
       !! ** Arguments : CHAR varname   : name of the field to send
       !!                REAL(:,:) to_send : 3D field, layout depends on the grid:
-      !!                   pycpl_phys  : (klon, klev), physics grid
-      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
-      !!                                the latitude band of the coupling grid
-      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
-      !!                                the latitude band of the coupling grid
       !!                INT kt        : physics time step (same numbering as physiq itap)
-      !!                INT grid      : grid selector
       !!
       !! ** OMP: the physics branch contains collectives (bcast_omp, gath2cpl)
-      !!         and must be called by all the threads; the dynamics branches
-      !!         are OMP-master only and the source array is shared between the
-      !!         threads: the caller must keep the whole team synchronized (OMP
-      !!         barrier) until the master is done reading it.
+      !!         and must be called by all the threads
       !!----------------------------------------------------------------------
       ! I/O
       INTEGER, INTENT(in)           ::  kt
-      INTEGER, INTENT(in)           ::  grid
       CHARACTER(len=*), INTENT(in)  :: varname
       REAL, DIMENSION(:,:), INTENT(in) ::  to_send
       ! local variables
-      INTEGER :: isec, ilvl, nlvl, i, j, l, nrow, ij, ij0, ij_lo
-      INTEGER :: ij_hi, j_lo, j_hi
+      INTEGER :: isec, ilvl, nlvl
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
       REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
@@ -400,117 +416,50 @@ CONTAINS
       ! Date of exchange
       isec = ( kt - 1 ) * phys_tstep
       !
-      SELECT CASE (grid)
+!$OMP MASTER
+      ! Get Eophis variable
+      CALL find_eophis_var(varname,curr_var)
+      IF (.NOT.associated(curr_var)) THEN
+         CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
+      END IF
       !
-      CASE (pycpl_phys)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (curr_var%in) THEN
-            CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
-         END IF
-         !
-         ! Number of levels to send
-         nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
+      ! Check
+      IF (curr_var%in) THEN
+         CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
+      END IF
+      !
+      ! Number of levels to send
+      nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
 !$OMP END MASTER
-         !
-         ! Distribute the level count to all threads
-         CALL bcast_omp(nlvl)
-         !
-         ! Gather from physics to coupling grid
-         DO ilvl = 1, nlvl
-            CALL gath2cpl(to_send(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
-         END DO
-         !
+      !
+      ! Distribute the level count to all threads
+      CALL bcast_omp(nlvl)
+      !
+      ! Gather from physics to coupling grid
+      DO ilvl = 1, nlvl
+         CALL gath2cpl(to_send(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
+      END DO
+      !
 !$OMP MASTER
-         ! Coupling layer
-         zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
-         CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
+      ! Coupling layer
+      zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
+      CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
 !$OMP END MASTER
-         !
-      CASE (pycpl_dyn_u, pycpl_dyn_v)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (curr_var%in) THEN
-            CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
-         END IF
-         !
-         ! Number of levels to send
-         nlvl = infosend(midpycpl)%fld(curr_var%idx)%nlvl
-         !
-         ! First and last flattened indices of the source array: no halo
-         ij_lo = LBOUND(to_send,1)
-         ij_hi = UBOUND(to_send,1)
-         j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
-         j_hi  = ij_hi/(nbp_lon+1)
-         !
-         ! v-grid has no pole row. Fill last couplig row with a duplicate of the last v row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-            nrow = (nbp_lat-1) - j_lo + 1
-         ELSE
-            nrow = jj_nb
-         END IF
-         !
-         ! Grid remapping
-         zbuf = 0.
-         DO j = j_lo, j_hi
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo + 1
-               DO l = 1, nlvl
-                  zbuf(i+(j-j_lo)*nbp_lon, l) = to_send(ij0,l)
-               END DO
-            END DO
-         END DO
-         !
-         ! Duplicate last v row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
-            DO l = 1, nlvl
-               zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
-            END DO
-         END IF
-         !
-         ! Coupling layer
-         CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
-!$OMP END MASTER
-         !
-      CASE DEFAULT
-         CALL abort_physic( 'send_to_python', ' unsupported grid selector for '//TRIM(varname) )
-         !
-      END SELECT
 #endif
       !
-   END SUBROUTINE send_to_python_gen_3d
+   END SUBROUTINE send_to_python_phys_3d
 
 
-   SUBROUTINE send_to_python_gen_2d(varname,to_send,kt,grid)
+   SUBROUTINE send_to_python_phys_2d(varname,to_send,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE send_to_python_gen_2d  ***
+      !!             ***  ROUTINE send_to_python_phys  ***
       !!
-      !! ** Purpose :   Send a 2D field to the Python coupler from either the
-      !!                physics grid or the dynamics u-grid. The field is
-      !!                transformed to the coupling grid (nbp_lon, jj_nb).
+      !! ** Purpose :   Send a 2D field to the coupler from the physics grid
+      !!                The field is transformed to the coupling grid
       !!
       !! ** Arguments : CHAR varname : name of the field to send
       !!                REAL(:) to_send : 2D field, layout depends on the grid:
-      !!                   pycpl_phys  : (klon), physics grid
-      !!                   pycpl_dyn_u : flattened (ij), u-grid, covering exactly
-      !!                                the latitude band of the coupling grid
       !!                INT kt          : physics time step (same numbering as physiq itap)
-      !!                INT grid        : grid selector
       !!
       !! ** Note: pure transition layer: the values are sent AS PROVIDED
       !!
@@ -518,12 +467,10 @@ CONTAINS
       !!----------------------------------------------------------------------
       ! I/O
       INTEGER, INTENT(in)           ::  kt
-      INTEGER, INTENT(in)           ::  grid
       CHARACTER(len=*), INTENT(in)  :: varname
       REAL, DIMENSION(:), INTENT(in) ::  to_send
       ! local variables
-      INTEGER :: isec, i, j, ij, ij0, ij_lo
-      INTEGER :: ij_hi, j_lo, j_hi
+      INTEGER :: isec
       TYPE(eophis_var), POINTER :: curr_var
       REAL, DIMENSION(nbp_lon*jj_nb,1) :: zbuf
       REAL, DIMENSION(nbp_lon,jj_nb) :: field_2d
@@ -533,91 +480,41 @@ CONTAINS
       ! Date of exchange
       isec = ( kt - 1 ) * phys_tstep
       !
-      SELECT CASE (grid)
+!$OMP MASTER
+      ! Get Eophis variable
+      CALL find_eophis_var(varname,curr_var)
+      IF (.NOT.associated(curr_var)) THEN
+         CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
+      END IF
       !
-      CASE (pycpl_phys)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (curr_var%in) THEN
-            CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
-         END IF
+      ! Check
+      IF (curr_var%in) THEN
+         CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
+      END IF
 !$OMP END MASTER
-         !
-         ! Gather from physics to coupling grid
-         CALL gath2cpl(to_send, field_2d, klon, pycpl_unity)
-         !
+      !
+      ! Gather from physics to coupling grid
+      CALL gath2cpl(to_send, field_2d, klon, pycpl_unity)
+      !
 !$OMP MASTER
-         ! Coupling layer
-         zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
-         CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
+      ! Coupling layer
+      zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
+      CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
 !$OMP END MASTER
-         !
-      CASE (pycpl_dyn_u)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'send_to_python', ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (curr_var%in) THEN
-            CALL abort_physic( 'send_to_python' , ' function called for incoming variable '//TRIM(varname) )
-         END IF
-          !
-          ! First and last flattened indices of the source array: no halo
-          ij_lo = LBOUND(to_send,1)
-          ij_hi = UBOUND(to_send,1)
-          j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
-          j_hi  = ij_hi/(nbp_lon+1)
-          !
-          ! Grid remapping
-          DO j = j_lo, j_hi
-             DO i = 1, nbp_lon
-                ij  = (j-1)*(nbp_lon+1) + i
-                ij0 = ij - ij_lo + 1
-                zbuf(i+(j-j_lo)*nbp_lon, 1) = to_send(ij0)
-             END DO
-          END DO
-         !
-         ! Coupling layer
-         CALL cpl_snd(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
-!$OMP END MASTER
-         !
-      CASE DEFAULT
-         CALL abort_physic( 'send_to_python', ' unsupported grid selector for '//TRIM(varname) )
-         !
-      END SELECT
 #endif
       !
-   END SUBROUTINE send_to_python_gen_2d
+   END SUBROUTINE send_to_python_phys_2d
 
 
-   SUBROUTINE receive_from_python_gen_3d(varname,to_rcv,kt,grid)
+   SUBROUTINE receive_from_python_phys_3d(varname,to_rcv,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE receive_from_python_gen_3d  ***
+      !!             ***  ROUTINE receive_from_python_phys  ***
       !!
-      !! ** Purpose :   Receive a 3D field from the Python coupler on either the
-      !!                physics grid or one of the dynamics grids. The field is
-      !!                transformed from the coupling grid (nbp_lon, jj_nb, nlvl).
+      !! ** Purpose :   Receive a 3D field from the coupler on the physics grid
+      !!                The field is transformed to the physic grid
       !!
       !! ** Arguments : CHAR varname   : name of the field to receive
-      !!                REAL(:,:) to_rcv : 3D field, layout depends on the grid:
-      !!                   pycpl_phys  : (klon, klev), physics grid
-      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
-      !!                                the latitude band of the coupling grid
-      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
-      !!                                the latitude band of the coupling grid
       !!                INT kt        : physics time step (same numbering as physiq itap)
-      !!                INT grid      : grid selector
       !!
       !! ** Note: pure transition layer: the values are received AS PROVIDED, without
       !!          any specific processing. On the v-grid the last coupling row of
@@ -626,156 +523,80 @@ CONTAINS
       !!          target array cannot hold otherwise).
       !!
       !! ** OMP: the physics branch contains collectives (bcast_omp, cpl2gath)
-      !!         and must be called by all the threads; the dynamics branches
-      !!         are OMP-master only and the target array is shared between the
-      !!         threads: the caller must keep the whole team synchronized (OMP
-      !!         barrier) until the master is done writing it.
+      !!         and must be called by all the threads.
       !!----------------------------------------------------------------------
       ! I/O
       INTEGER, INTENT(in)           ::  kt
-      INTEGER, INTENT(in)           ::  grid
       CHARACTER(len=*), INTENT(in)  :: varname
       REAL, DIMENSION(:,:), INTENT(inout) ::  to_rcv
-       ! local variables
-       INTEGER :: isec, ilvl, nlvl, i, j, l, nrow, ij, ij0, ij_lo
-       INTEGER :: ij_hi, j_lo, j_hi
-       TYPE(eophis_var), POINTER :: curr_var
-       REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
-       REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
-       REAL, DIMENSION(klon_mpi) :: gath_buf
+      ! local variables
+      INTEGER :: isec, ilvl, nlvl
+      TYPE(eophis_var), POINTER :: curr_var
+      REAL, DIMENSION(nbp_lon*jj_nb,nbp_lev) :: zbuf
+      REAL, DIMENSION(nbp_lon,jj_nb,nbp_lev) :: field_3d
+      REAL, DIMENSION(klon_mpi) :: gath_buf
       !!----------------------------------------------------------------------
       !
 #if defined key_eophis
       ! Date of exchange
       isec = ( kt - 1 ) * phys_tstep
       !
-      SELECT CASE (grid)
+!$OMP MASTER
+      ! Get Eophis variable
+      CALL find_eophis_var(varname,curr_var)
+      IF (.NOT.associated(curr_var)) THEN
+         CALL abort_physic( 'receive_from_python' , ' unrecognized variable name '//TRIM(varname) )
+      END IF
       !
-      CASE (pycpl_phys)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'receive_from_python' , ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (.NOT. curr_var%in) THEN
-            CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
-         END IF
-         !
-         ! Number of levels to receive
-         nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
+      ! Check
+      IF (.NOT. curr_var%in) THEN
+         CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
+      END IF
+      !
+      ! Number of levels to receive
+      nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
 !$OMP END MASTER
-         !
-         ! Distribute the level count to all threads
-         CALL bcast_omp(nlvl)
-         !
-         ! save value if nothing is done
-         DO ilvl = 1, nlvl
-            CALL gath2cpl(to_rcv(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
-         END DO
-         !
+      !
+      ! Distribute the level count to all threads
+      CALL bcast_omp(nlvl)
+      !
+      ! save value if nothing is done
+      DO ilvl = 1, nlvl
+         CALL gath2cpl(to_rcv(:,ilvl), field_3d(:,:,ilvl), klon, pycpl_unity)
+      END DO
+      !
 !$OMP MASTER
-         ! Coupling layer
-         zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
-         CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
-         field_3d(:,:,1:nlvl) = RESHAPE(zbuf(:,1:nlvl),(/nbp_lon,jj_nb,nlvl/))
+      ! Coupling layer
+      zbuf(:,1:nlvl) = RESHAPE(field_3d(:,:,1:nlvl),(/nbp_lon*jj_nb,nlvl/))
+      CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
+      field_3d(:,:,1:nlvl) = RESHAPE(zbuf(:,1:nlvl),(/nbp_lon,jj_nb,nlvl/))
 !$OMP END MASTER
-         !
-         ! Scatter from coupling to physics grid
-         DO ilvl = 1, nlvl
-            CALL cpl2gath(field_3d(:,:,ilvl), gath_buf, klon, pycpl_unity)
-            to_rcv(:,ilvl) = gath_buf(1:klon)
-         END DO
-         !
-      CASE (pycpl_dyn_u, pycpl_dyn_v)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'receive_from_python' , ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (.NOT. curr_var%in) THEN
-            CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
-         END IF
-         !
-         ! Number of levels to receive
-         nlvl = inforecv(midpycpl)%fld(curr_var%idx)%nlvl
-         !
-         ! First and last flattened indices of the source array: no halo
-         ij_lo = LBOUND(to_rcv,1)
-         ij_hi = UBOUND(to_rcv,1)
-         j_lo  = (ij_lo-1)/(nbp_lon+1) + 1
-         j_hi  = ij_hi/(nbp_lon+1)
-         !
-         ! Drop last fake S row: v-grid has no pole row
-         IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
-            nrow = (nbp_lat-1) - j_lo + 1
-         ELSE
-            nrow = jj_nb
-         END IF
-         !
-         ! save value if nothing is done
-         zbuf = 0.
-         DO j = j_lo, j_hi
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo + 1
-               DO l = 1, nlvl
-                  zbuf(i+(j-j_lo)*nbp_lon, l) = to_rcv(ij0,l)
-               END DO
-            END DO
-         END DO
-         !
-         ! Coupling layer
-         CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,1:nlvl))
-         !
-         ! Scatter from coupling to dynamics grid
-         DO j = j_lo, j_hi
-            DO i = 1, nbp_lon
-               ij  = (j-1)*(nbp_lon+1) + i
-               ij0 = ij - ij_lo + 1
-               DO l = 1, nlvl
-                  to_rcv(ij0,l) = zbuf(i+(j-j_lo)*nbp_lon, l)
-               END DO
-            END DO
-            ! column iip1 duplicates column 1 (dynamics periodicity)
-            ij = (j-1)*(nbp_lon+1)
-            DO l = 1, nlvl
-               to_rcv(ij+nbp_lon+1-ij_lo+1, l) = to_rcv(ij+1-ij_lo+1, l)
-            END DO
-         END DO
-!$OMP END MASTER
-         !
-      CASE DEFAULT
-         CALL abort_physic( 'receive_from_python', ' unsupported grid selector for '//TRIM(varname) )
-         !
-      END SELECT
+      !
+      ! Scatter from coupling to physics grid
+      DO ilvl = 1, nlvl
+         CALL cpl2gath(field_3d(:,:,ilvl), gath_buf, klon, pycpl_unity)
+         to_rcv(:,ilvl) = gath_buf(1:klon)
+      END DO
 #endif
       !
-   END SUBROUTINE receive_from_python_gen_3d
+   END SUBROUTINE receive_from_python_phys_3d
 
 
-   SUBROUTINE receive_from_python_gen_2d(varname,to_rcv,kt,grid)
+   SUBROUTINE receive_from_python_phys_2d(varname,to_rcv,kt)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE receive_from_python_gen_2d  ***
+      !!             ***  ROUTINE receive_from_python_phys  ***
       !!
-      !! ** Purpose :   Receive a 2D field from the Python coupler on the
-      !!                physics grid (klon).
+      !! ** Purpose :   Receive a 3D field from the coupler on the physics grid
+      !!                The field is transformed to the physic grid
       !!
       !! ** Arguments : CHAR varname : name of the field to receive
       !!                REAL(:) to_rcv : 2D field on the physics grid (klon)
       !!                INT kt          : physics time step (same numbering as physiq itap)
-      !!                INT grid        : grid selector (pycpl_phys only)
+      !!
+      !! ** OMP: see receive_from_python_phys_3d
       !!----------------------------------------------------------------------
       ! I/O
       INTEGER, INTENT(in)           ::  kt
-      INTEGER, INTENT(in)           ::  grid
       CHARACTER(len=*), INTENT(in)  :: varname
       REAL, DIMENSION(:), INTENT(inout) ::  to_rcv
       ! local variables
@@ -790,44 +611,178 @@ CONTAINS
       ! Date of exchange
       isec = ( kt - 1 ) * phys_tstep
       !
-      SELECT CASE (grid)
+!$OMP MASTER
+      ! Get Eophis variable
+      CALL find_eophis_var(varname,curr_var)
+      IF (.NOT.associated(curr_var)) THEN
+         CALL abort_physic( 'receive_from_python' , ' unrecognized variable name '//TRIM(varname) )
+      END IF
       !
-      CASE (pycpl_phys)
-         !
-!$OMP MASTER
-         ! Get Eophis variable
-         CALL find_eophis_var(varname,curr_var)
-         IF (.NOT.associated(curr_var)) THEN
-            CALL abort_physic( 'receive_from_python' , ' unrecognized variable name '//TRIM(varname) )
-         END IF
-         !
-         ! Check
-         IF (.NOT. curr_var%in) THEN
-            CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
-         END IF
+      ! Check
+      IF (.NOT. curr_var%in) THEN
+         CALL abort_physic( 'receive_from_python' , ' function called for outgoing variable '//TRIM(varname) )
+      END IF
 !$OMP END MASTER
-         !
-         ! save value if nothing is done
-         CALL gath2cpl(to_rcv, field_2d, klon, pycpl_unity)
-         !
+      !
+      ! save value if nothing is done
+      CALL gath2cpl(to_rcv, field_2d, klon, pycpl_unity)
+      !
 !$OMP MASTER
-         ! Coupling layer
-         zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
-         CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
-         field_2d = RESHAPE(zbuf(:,1),(/nbp_lon,jj_nb/))
+      ! Coupling layer
+      zbuf(:,1) = RESHAPE(field_2d,(/nbp_lon*jj_nb/))
+      CALL cpl_rcv(midpycpl, curr_var%idx, isec, zbuf(kstart:kend,:))
+      field_2d = RESHAPE(zbuf(:,1),(/nbp_lon,jj_nb/))
 !$OMP END MASTER
-         !
-         ! Scatter from coupling to physics grid
-         CALL cpl2gath(field_2d, gath_buf, klon, pycpl_unity)
-         to_rcv(:) = gath_buf(1:klon)
-         !
-      CASE DEFAULT
-         CALL abort_physic( 'receive_from_python', ' 2D reception is only available on the physics grid' )
-         !
-      END SELECT
+      !
+      ! Scatter from coupling to physics grid
+      CALL cpl2gath(field_2d, gath_buf, klon, pycpl_unity)
+      to_rcv(:) = gath_buf(1:klon)
+      !
 #endif
       !
-   END SUBROUTINE receive_from_python_gen_2d
+   END SUBROUTINE receive_from_python_phys_2d
+
+
+   ! ++++++++++++ DYNAMIC GRID ++++++++++++
+
+
+   SUBROUTINE send_to_python_dyn_3d(varname,to_send,kt,grid)
+      !!----------------------------------------------------------------------
+      !!             ***  ROUTINE send_to_python_dyn  ***
+      !!
+      !! ** Purpose :   Send a 3D field to the coupler from the dynamic grid
+      !!                The field is transformed to the physics grid
+      !!
+      !! ** Arguments : CHAR varname   : name of the field to send
+      !!                REAL(:,:) to_send : 3D field, layout depends on the grid:
+      !!                   pycpl_phys  : (klon, klev), physics grid
+      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                INT kt        : physics time step (same numbering as physiq itap)
+      !!                INT grid      : grid selector
+      !!----------------------------------------------------------------------
+      ! I/O
+      INTEGER, INTENT(in)           ::  kt
+      INTEGER, INTENT(in)           ::  grid
+      CHARACTER(len=*), INTENT(in)  :: varname
+      REAL, DIMENSION(:,:), INTENT(in) ::  to_send
+      ! local variables
+      REAL, DIMENSION(klon,klev) :: zbuf_phy, zbuf_omp
+      !!----------------------------------------------------------------------
+      !
+#if defined key_eophis
+      !
+      ! Transform field form dynamics to physics grid
+      !
+      ! v-grid has no pole row. Fill last couplig row with a duplicate of the last v row
+      !IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn) THEN
+      !   nrow = (nbp_lat-1) - j_lo + 1
+      !ELSE
+      !   nrow = jj_nb
+      !END IF
+      !
+      ! Grid remapping
+      !zbuf = 0.
+      !DO j = j_lo, j_hi
+      !   DO i = 1, nbp_lon
+      !      ij  = (j-1)*(nbp_lon+1) + i
+      !      ij0 = ij - ij_lo + 1
+      !      DO l = 1, nlvl
+      !         zbuf(i+(j-j_lo)*nbp_lon, l) = to_send(ij0,l)
+      !      END DO
+      !   END DO
+      !END DO
+      !
+      ! Duplicate last v row
+      !IF (grid == pycpl_dyn_v .AND. is_south_pole_dyn .AND. nrow >= 1) THEN
+      !   DO l = 1, nlvl
+      !      zbuf((jj_nb-1)*nbp_lon+1:jj_nb*nbp_lon, l) = zbuf((jj_nb-2)*nbp_lon+1:(jj_nb-1)*nbp_lon, l)
+      !    END DO
+      !END IF
+      !
+      ! Coupling layer for physics
+      CALL send_to_python_phys_3d(varname, zbuf_omp, kt)
+#endif
+      !
+   END SUBROUTINE send_to_python_dyn_3d
+
+
+   SUBROUTINE send_to_python_dyn_2d(varname,to_send,kt,grid)
+      !!----------------------------------------------------------------------
+      !!             ***  ROUTINE send_to_python_dyn  ***
+      !!
+      !! ** Purpose :   Send a 2D field to the coupler from the dynamic grid
+      !!                The field is transformed to the physic grid
+      !!
+      !! ** Arguments : CHAR varname : name of the field to send
+      !!                REAL(:) to_send : 2D field, layout depends on the grid:
+      !!                   pycpl_phys  : (klon), physics grid
+      !!                   pycpl_dyn_u : flattened (ij), u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                INT kt          : physics time step (same numbering as physiq itap)
+      !!                INT grid      : grid selector
+      !!
+      !! ** Note: pure transition layer: the values are sent AS PROVIDED
+      !!----------------------------------------------------------------------
+      ! I/O
+      INTEGER, INTENT(in)            ::  kt
+      INTEGER, INTENT(in)            ::  grid
+      CHARACTER(len=*), INTENT(in)   :: varname
+      REAL, DIMENSION(:), INTENT(in) ::  to_send
+      ! local variables
+      REAL, DIMENSION(klon_mpi) :: zbuf_phy, zbuf_omp
+      !!----------------------------------------------------------------------
+      !
+#if defined key_eophis
+      !
+      ! Transform field form dynamics to physics grid
+      !
+      ! Coupling layer for physics
+      CALL send_to_python_phys_2d(varname, zbuf_omp, kt)
+#endif
+      !
+   END SUBROUTINE send_to_python_dyn_2d
+
+
+   SUBROUTINE receive_from_python_dyn_3d(varname,to_rcv,kt,grid)
+      !!----------------------------------------------------------------------
+      !!             ***  ROUTINE receive_from_python_dyn  ***
+      !!
+      !! ** Purpose :   Receive a 3D field from the coupler on the dynamic grid
+      !!                The field is transformed from the physic grid
+      !!
+      !! ** Arguments : CHAR varname   : name of the field to receive
+      !!                REAL(:,:) to_rcv : 3D field, layout depends on the grid:
+      !!                   pycpl_phys  : (klon, klev), physics grid
+      !!                   pycpl_dyn_u : flattened (ij, llm) u-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                   pycpl_dyn_v : flattened (ij, llm) v-grid, covering exactly
+      !!                                the latitude band of the coupling grid
+      !!                INT kt        : physics time step (same numbering as physiq itap)
+      !!                INT grid      : grid selector
+      !!
+      !! ** Note: pure transition layer: the values are sent AS PROVIDED
+      !!----------------------------------------------------------------------
+      ! I/O
+      INTEGER, INTENT(in)           ::  kt
+      INTEGER, INTENT(in)           ::  grid
+      CHARACTER(len=*), INTENT(in)  :: varname
+      REAL, DIMENSION(:,:), INTENT(inout) ::  to_rcv
+      ! local variables
+      REAL, DIMENSION(klon,klev) :: zbuf_phy, zbuf_omp
+      !!----------------------------------------------------------------------
+      !
+#if defined key_eophis
+      !
+      ! Coupling layer for physics
+      CALL receive_from_python_phys_3d(varname, zbuf_omp, kt)
+      !
+#endif
+      !
+   END SUBROUTINE receive_from_python_dyn_3d
+
 
 
    SUBROUTINE finalize_python_coupling

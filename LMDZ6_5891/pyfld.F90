@@ -12,7 +12,7 @@ MODULE pyfld
    USE mod_phys_lmdz_omp_data, ONLY: klon_omp
    USE mod_grid_phy_lmdz, ONLY: nbp_lon
    USE mod_interface_dyn_phys, ONLY: index_i, index_j
-   USE Bands, ONLY: distrib_physic
+   USE Bands, ONLY: distrib_physic, distrib_caldyn
 
    IMPLICIT NONE
    PUBLIC
@@ -34,8 +34,8 @@ MODULE pyfld
    !!----------------------------------------------------------------------
    !!                   Fields on the dynamic grid
    !!----------------------------------------------------------------------
-   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: py_du_dyn, py_dv_dyn
-   !REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: template_u_dyn, template_v_dyn
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:) :: py_du_dyn, py_dv_dyn
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)   :: py_du_caldyn, py_dv_caldyn
 
 CONTAINS
 
@@ -47,6 +47,7 @@ CONTAINS
       !!
       !! ** Method  :   * Allocate arrays for Python fields
       !!----------------------------------------------------------------------
+      USE paramet_mod_h, ONLY: iip1
       !
       ! Allocate arrays
       IF ( lk_pycpl ) THEN
@@ -62,11 +63,12 @@ CONTAINS
          !ALLOCATE( template_phys(klon, klev) )
          !
  !$OMP MASTER
-         ! Dynamics
-         ALLOCATE( py_du_dyn(distrib_physic%ijb_u:distrib_physic%ije_u, llm) )
-         ALLOCATE( py_dv_dyn(distrib_physic%ijb_v:distrib_physic%ije_v, llm) )
-         !ALLOCATE( template_u_dyn(distrib_physic%ijb_u:distrib_physic%ije_u, llm) )
-         !ALLOCATE( template_v_dyn(distrib_physic%ijb_v:distrib_physic%ije_v, llm) )
+         ! Dynamics : physics band
+         ALLOCATE( py_du_dyn(iip1, distrib_physic%jjb_u:distrib_physic%jje_u, llm) )
+         ALLOCATE( py_dv_dyn(iip1, distrib_physic%jjb_v:distrib_physic%jje_v, llm) )
+         ! Dynamics : caldyn band
+         ALLOCATE( py_du_caldyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u, llm) )
+         ALLOCATE( py_dv_caldyn(distrib_caldyn%ijb_v:distrib_caldyn%ije_v, llm) )
  !$OMP END MASTER
       END IF
       !
@@ -87,6 +89,7 @@ CONTAINS
       IF ( lk_pycpl ) THEN
          DEALLOCATE( nn_cosday, nn_sinday )
          DEALLOCATE( py_du_dyn, py_dv_dyn )
+         DEALLOCATE( py_du_caldyn, py_dv_caldyn )
          !DEALLOCATE( template_phys, template_dyn)
       END IF
  !$OMP END MASTER
@@ -94,23 +97,60 @@ CONTAINS
    END SUBROUTINE pyfld_dealloc
 
 
+   SUBROUTINE pyfld_swap_ph2cd(fld_du_dyn, fld_dv_dyn, fld_du_caldyn, fld_dv_caldyn)
+      !!----------------------------------------------------------------------
+      !!             ***  ROUTINE pyfld_swap_ph2cd  ***
+      !!
+      !! ** Purpose :   Swap U and V wind fields from the physics distribution
+      !!                (distrib_physic) to the dynamics distribution
+      !!                (distrib_caldyn), flattened ij convention.
+      !!----------------------------------------------------------------------
+      USE parallel_lmdz
+      USE mod_hallo
+      ! I/O
+      REAL, INTENT(IN)  :: fld_du_dyn(distrib_physic%ijb_u:distrib_physic%ije_u, llm)
+      REAL, INTENT(IN)  :: fld_dv_dyn(distrib_physic%ijb_v:distrib_physic%ije_v, llm)
+      REAL, INTENT(OUT) :: fld_du_caldyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u, llm)
+      REAL, INTENT(OUT) :: fld_dv_caldyn(distrib_caldyn%ijb_v:distrib_caldyn%ije_v, llm)
+      ! Local variables
+      TYPE(Request), SAVE :: Req_swap
+      !$OMP THREADPRIVATE(Req_swap)
+      !!----------------------------------------------------------------------
+      !
+      CALL SetTag(Req_swap, 800)
+      CALL Register_SwapField_u(fld_du_dyn, fld_du_caldyn, distrib_caldyn, Req_swap)
+      CALL Register_SwapField_v(fld_dv_dyn, fld_dv_caldyn, distrib_caldyn, Req_swap)
+      CALL SendRequest(Req_swap)
+      !$OMP BARRIER
+      CALL WaitRequest(Req_swap)
+      !$OMP BARRIER
+      !
+   END SUBROUTINE pyfld_swap_ph2cd
+
+
    SUBROUTINE phys_to_dyn(fld_phys_u, fld_phys_v, fld_dyn_u, fld_dyn_v)
       !!----------------------------------------------------------------------
       !!             ***  ROUTINE phys_to_dyn_u  ***
       !!
-      !! ** Purpose :   Perform a full Python coupling exchange of dynamic fields
+      !! ** Purpose :   Re-index wind fields from the compact physics grid
+      !!                (klon) onto the dynamics grid (i,j,l) on
+      !!                distrib_physic.
       !!
-      !! ** Arguments :
+      !! ** Arguments : REAL fld_phys_u(klon, llm)         : zonal wind (IN)
+      !!                REAL fld_phys_v(klon, llm)         : meridional wind (IN)
+      !!                REAL fld_dyn_u(iip1, jjb_u:jje_u, llm) : zonal wind (OUT)
+      !!                REAL fld_dyn_v(iip1, jjb_v:jje_v, llm) : meridional wind (OUT)
       !!----------------------------------------------------------------------
       USE paramet_mod_h
       USE parallel_lmdz
       USE lmdz_mpi
       USE comgeom2_mod_h
+      USE mod_hallo
       ! I/O
-      REAL, INTENT(OUT)             :: fld_dyn_u(iip1,distrib_physic%jjb_u:distrib_physic%jje_u, llm)
-      REAL, INTENT(OUT)             :: fld_dyn_v(iip1,distrib_physic%jjb_v:distrib_physic%jje_v, llm)
       REAL, INTENT(IN)              :: fld_phys_u(klon, llm)
       REAL, INTENT(IN)              :: fld_phys_v(klon, llm)
+      REAL, INTENT(OUT)             :: fld_dyn_u(iip1,distrib_physic%jjb_u:distrib_physic%jje_u, llm)
+      REAL, INTENT(OUT)             :: fld_dyn_v(iip1,distrib_physic%jjb_v:distrib_physic%jje_v, llm)
       ! Local variables
       INTEGER, DIMENSION(MPI_STATUS_SIZE,4) :: Status
       INTEGER, DIMENSION(4) :: Req
@@ -269,15 +309,6 @@ CONTAINS
 !$OMP END DO NOWAIT
       ENDIF
       !
-      ! Dyn distrib
-!      CALL SetTag(Request_physic,800)
-!      CALL Register_SwapField_u(fld_dyn_u,fld_caldyn_u,distrib_caldyn,Request_physic)
-!      CALL Register_SwapField_v(fld_dyn_v,fld_caldyn_v,distrib_caldyn,Request_physic)
-!      CALL SendRequest(Requet_Physic)
-!!$OMP BARRIER
-!      CALL WaitRequest(Requet_Physic)
-!!$OMP BARRIER
-      !
    END SUBROUTINE phys_to_dyn
-
+   !
 END MODULE pyfld

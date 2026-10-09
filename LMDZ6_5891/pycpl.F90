@@ -5,7 +5,7 @@ MODULE pycpl
    !! The module makes no assumptions about configuration of the coupling libraries
    !!====================================================================
    !! History :  LMDZ6  ! 2026-05  (A. Barge)  Original code
-   !!            LMDZ6  ! 2026-09  (A. Barge)  Generic grids: physics and dynamics
+   !!            LMDZ6  ! 2026-09  (A. Barge)  Physics grid
    !!----------------------------------------------------------------------
 
    !!----------------------------------------------------------------------
@@ -60,8 +60,8 @@ MODULE pycpl
       MODULE PROCEDURE send_to_python_phys_3d, send_to_python_phys_2d
    END INTERFACE send_to_python_phys
 
-   ! RECEIVE interface for cpl, phys or dyn grids
-   ! --------------------------------------------
+   ! RECEIVE interface for cpl or phys grids
+   ! ---------------------------------------
    INTERFACE receive_from_python_cpl
       MODULE PROCEDURE receive_from_python_cpl_3d, receive_from_python_cpl_2d
    END INTERFACE receive_from_python_cpl
@@ -73,14 +73,11 @@ MODULE pycpl
    ! Module variables
    ! ----------------
    ! Identity index array for physics-to-coupling grid transformation.
-   INTEGER, PRIVATE, ALLOCATABLE, SAVE, DIMENSION(:) :: pycpl_unity
+   INTEGER, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:) :: pycpl_unity
    !$OMP THREADPRIVATE(pycpl_unity)
 
+   ! Pole bounds
    INTEGER, PRIVATE :: kstart, kend
-
-   ! Grid selectors of the dynamic grids
-   INTEGER, PUBLIC, PARAMETER :: pycpl_grid_u = 1  ! dynamics u-grid, flattened like ucov
-   INTEGER, PUBLIC, PARAMETER :: pycpl_grid_v = 2  ! dynamics v-grid, flattened like vcov
 
 CONTAINS
 
@@ -91,7 +88,6 @@ CONTAINS
       !! ** Purpose :   Initialisation of the python coupling
       !!
       !! ** Method  :   * Read eophis namelist if used
-      !!                * Define exchanges
       !!                * Configure coupling layer
       !!----------------------------------------------------------------------
       !!----------------------------------------------------------------------
@@ -505,12 +501,6 @@ CONTAINS
       !!
       !! ** Arguments : CHAR varname   : name of the field to receive
       !!                INT kt        : physics time step (same numbering as physiq itap)
-      !!
-      !! ** Note: pure transition layer: the values are received AS PROVIDED, without
-      !!          any specific processing. On the v-grid the last coupling row of
-      !!          the southernmost band (fake 90S row) is dropped, and the dynamics
-      !!          wrap column iip1 duplicates column 1 (grid completion that the
-      !!          target array cannot hold otherwise).
       !!
       !! ** OMP: the physics branch contains collectives (bcast_omp, cpl2gath)
       !!         and must be called by all the threads.

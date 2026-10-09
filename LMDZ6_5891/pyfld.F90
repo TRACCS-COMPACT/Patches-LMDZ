@@ -29,13 +29,19 @@ MODULE pyfld
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: py_du_phys, py_dv_phys
    !$OMP THREADPRIVATE(py_du_phys,py_dv_phys)
    !REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)  :: template_phys
-   !!$OMP THREADPRIVATE(ptemplate_phys)
+   !!$OMP THREADPRIVATE(template_phys)
 
    !!----------------------------------------------------------------------
    !!                   Fields on the dynamic grid
    !!----------------------------------------------------------------------
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:) :: py_du_dyn, py_dv_dyn
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)   :: py_du_caldyn, py_dv_caldyn
+
+   !!-----------------------------------------------------------------------
+   !!        OMP working buffers - phys --> dynamic grid transformation
+   !!-----------------------------------------------------------------------
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: zbuf_u, zbuf_v   
+   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: zbuf_u2, zbuf_v2
 
 CONTAINS
 
@@ -69,6 +75,13 @@ CONTAINS
          ! Dynamics : caldyn band
          ALLOCATE( py_du_caldyn(distrib_caldyn%ijb_u:distrib_caldyn%ije_u, llm) )
          ALLOCATE( py_dv_caldyn(distrib_caldyn%ijb_v:distrib_caldyn%ije_v, llm) )
+         py_du_dyn = 0.0
+         py_dv_dyn = 0.0
+         py_du_caldyn = 0.0
+         py_dv_caldyn = 0.0
+         ! Shared OMP working buffers
+         ALLOCATE( zbuf_u(klon_mpi, llm), zbuf_v(klon_mpi, llm) )
+         ALLOCATE( zbuf_u2(klon_mpi+iim, llm), zbuf_v2(klon_mpi+iim, llm) )
  !$OMP END MASTER
       END IF
       !
@@ -90,7 +103,8 @@ CONTAINS
          DEALLOCATE( nn_cosday, nn_sinday )
          DEALLOCATE( py_du_dyn, py_dv_dyn )
          DEALLOCATE( py_du_caldyn, py_dv_caldyn )
-         !DEALLOCATE( template_phys, template_dyn)
+         DEALLOCATE( zbuf_u, zbuf_v, zbuf_u2, zbuf_v2 )
+         !DEALLOCATE( template_phys, template_cpl)
       END IF
  !$OMP END MASTER
       !
@@ -102,8 +116,9 @@ CONTAINS
       !!             ***  ROUTINE pyfld_swap_ph2cd  ***
       !!
       !! ** Purpose :   Swap U and V wind fields from the physics distribution
-      !!                (distrib_physic) to the dynamics distribution
-      !!                (distrib_caldyn), flattened ij convention.
+      !!                (distrib_physic) to the dynamics distribution (distrib_caldyn)
+      !!
+      !! ** Method  :   Mimics the exit swap block of call_calfis()
       !!----------------------------------------------------------------------
       USE parallel_lmdz
       USE mod_hallo
@@ -130,11 +145,10 @@ CONTAINS
 
    SUBROUTINE phys_to_dyn(fld_phys_u, fld_phys_v, fld_dyn_u, fld_dyn_v)
       !!----------------------------------------------------------------------
-      !!             ***  ROUTINE phys_to_dyn_u  ***
+      !!             ***  ROUTINE phys_to_dyn  ***
       !!
       !! ** Purpose :   Re-index wind fields from the compact physics grid
-      !!                (klon) onto the dynamics grid (i,j,l) on
-      !!                distrib_physic.
+      !!                onto the distrib_physic dynamics grid. Mimics calfis_loc()
       !!
       !! ** Arguments : REAL fld_phys_u(klon, llm)         : zonal wind (IN)
       !!                REAL fld_phys_v(klon, llm)         : meridional wind (IN)
@@ -154,16 +168,17 @@ CONTAINS
       ! Local variables
       INTEGER, DIMENSION(MPI_STATUS_SIZE,4) :: Status
       INTEGER, DIMENSION(4) :: Req
-      REAL, DIMENSION(klon_mpi,llm) :: zbuf_u, zbuf_v
-      REAL, DIMENSION(klon_mpi+iim,llm) :: zbuf_u2, zbuf_v2
       INTEGER :: i, j ,l, istart, iend, ig0, ierr
       REAL,SAVE,DIMENSION(1:iim,1:llm) :: du_send, du_recv, dv_send, dv_recv
       !!----------------------------------------------------------------------
       !
+!$OMP MASTER
       zbuf_u = 0.0
       zbuf_v = 0.0
       zbuf_u2 = 0.0
       zbuf_v2 = 0.0
+!$OMP END MASTER
+!$OMP BARRIER
       !
       DO l = 1, llm
          DO i = 1, klon_omp
@@ -217,9 +232,9 @@ CONTAINS
 !$OMP DO SCHEDULE(STATIC,OMP_CHUNK)
       DO l = 1, llm
          zbuf_u2(1:klon_mpi,l) = zbuf_u(1:klon_mpi,l)
-         zbuf_u2(klon+1:klon+iim,l) = du_recv(1:iim,l)
+         zbuf_u2(klon_mpi+1:klon_mpi+iim,l) = du_recv(1:iim,l)
          zbuf_v2(1:klon_mpi,l) = zbuf_v(1:klon_mpi,l)
-         zbuf_v2(klon+1:klon+iim,l) = dv_recv(1:iim,l)
+         zbuf_v2(klon_mpi+1:klon_mpi+iim,l) = dv_recv(1:iim,l)
       ENDDO
 !$OMP END DO NOWAIT
       !
@@ -308,7 +323,8 @@ CONTAINS
          ENDDO
 !$OMP END DO NOWAIT
       ENDIF
+!$OMP BARRIER
       !
    END SUBROUTINE phys_to_dyn
-   !
+
 END MODULE pyfld

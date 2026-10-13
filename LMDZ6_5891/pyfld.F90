@@ -42,7 +42,6 @@ MODULE pyfld
    !!----------------------------------------------------------------------
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: zbuf_u, zbuf_v   
    REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: zbuf_u2, zbuf_v2
-   REAL, PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: zbuf 
 
 CONTAINS
 
@@ -83,7 +82,10 @@ CONTAINS
          ! Shared OMP working buffers
          ALLOCATE( zbuf_u(klon_mpi, llm), zbuf_v(klon_mpi, llm) )
          ALLOCATE( zbuf_u2(1-iim:klon_mpi+iim, llm), zbuf_v2(1-iim:klon_mpi+iim, llm) )
-         ALLOCATE( zbuf(klon_mpi, llm) )
+         zbuf_u = 0.0
+         zbuf_v = 0.0
+         zbuf_u2 = 0.0
+         zbuf_v2 = 0.0
  !$OMP END MASTER
       END IF
       !

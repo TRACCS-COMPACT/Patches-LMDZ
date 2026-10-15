@@ -107,7 +107,7 @@ CONTAINS
          DEALLOCATE( nn_cosday, nn_sinday )
          DEALLOCATE( py_du_dyn, py_dv_dyn )
          DEALLOCATE( py_du_caldyn, py_dv_caldyn )
-         DEALLOCATE( zbuf_u, zbuf_v, zbuf_u2, zbuf_v2, zbuf )
+         DEALLOCATE( zbuf_u, zbuf_v, zbuf_u2, zbuf_v2 )
          !DEALLOCATE( template_phys, template_dyn)
       END IF
  !$OMP END MASTER
